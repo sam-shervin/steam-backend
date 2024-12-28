@@ -89,6 +89,126 @@ app.post("/heatMap", requiresAuth(), (req, res) => {
   res.json({ success: true });
 });
 
+app.post("/promoteUser", requiresAuth(), async (req, res) => {
+  const { email } = req.body;
+  const adminUser = req.oidc.user.email;
+
+  // Ensure the current user is an admin
+  const isAdmin = await prisma.user.findUnique({
+    where: { email: adminUser },
+  }).isAdmin;
+
+  if (!isAdmin) {
+    return res.status(403).json({ error: "Not authorized" });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { email: email },
+  });
+
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  // Promote user to admin by adding to Admin table
+  await prisma.admin.create({
+    data: {
+      email: email,
+    },
+  });
+
+  // Update the user record to set isAdmin flag
+  await prisma.user.update({
+    where: { email: email },
+    data: { isAdmin: true },
+  });
+
+  res.json({ success: true });
+});
+
+app.get("/complaints", requiresAuth(), async (req, res) => {
+  const adminUser = req.oidc.user.email;
+
+  // Check if user is an admin
+  const isAdmin = await prisma.user.findUnique({
+    where: { email: adminUser },
+  }).isAdmin;
+
+  if (!isAdmin) {
+    return res.status(403).json({ error: "Not authorized" });
+  }
+
+  const complaints = await prisma.complaint.findMany({
+    include: { user: true },
+  });
+
+  res.json(complaints);
+});
+
+// An endpoint that allows the admin to change the status of a complaint.
+app.put("/complaint/status", requiresAuth(), async (req, res) => {
+  const { complaintUID, status } = req.body;
+  const adminUser = req.oidc.user.email;
+
+  // Check if user is an admin
+  const isAdmin = await prisma.user.findUnique({
+    where: { email: adminUser },
+  }).isAdmin;
+
+  if (!isAdmin) {
+    return res.status(403).json({ error: "Not authorized" });
+  }
+
+  const complaint = await prisma.complaint.findUnique({
+    where: { complaintUID: complaintUID },
+  });
+
+  if (!complaint) {
+    return res.status(404).json({ error: "Complaint not found" });
+  }
+
+  const updatedComplaint = await prisma.complaint.update({
+    where: { complaintUID: complaintUID },
+    data: {
+      status: status,
+      adminWhoModified: adminUser, // Admin who changed the status
+    },
+  });
+
+  res.json(updatedComplaint);
+});
+
+
+// An endpoint that allows the user to submit a complaint.
+app.post("/complaint", requiresAuth(), async (req, res) => {
+  const { email } = req.oidc.user;
+  const { complaintUID, status = "NOT_VIEWED" } = req.body;
+
+  // Create complaint record in database
+  const newComplaint = await prisma.complaint.create({
+    data: {
+      complaintUID: complaintUID,
+      email: email,
+      status: status,
+    },
+  });
+
+  res.json({ success: true, complaint: newComplaint });
+});
+
+// An endpoint that allows the user to view their complaints.
+app.get("/myComplaints", requiresAuth(), async (req, res) => {
+  const { email } = req.oidc.user;
+
+  const complaints = await prisma.complaint.findMany({
+    where: { email: email },
+  });
+
+  res.json(complaints);
+});
+
+
+
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
 });
