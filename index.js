@@ -66,7 +66,29 @@ app.get("/profile", requiresAuth(), (req, res) => {
   res.json(req.oidc.user);
 });
 
+app.put("/profileUpdate", reqiresAuth(), (req, res) => {
+  const { name } = req.body;
+  const { email, email_verified, picture } = req.oidc.user;
+  prisma.user.upsert({
+    where: { email: email },
+    update: { name: name },
+    create: {
+      email: email,
+      name: name,
+      verified: email_verified,
+      picture: picture,
+    },
+  });
+  res.json({ success: true });
+});
+
+app.post("/heatMap", requiresAuth(), (req, res) => {
+  // get lat and lon and send to a flask server
+  //const { lat, lon } = req.body;
+  // send to flask server
+  res.json({ success: true });
+});
+
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
 });
-

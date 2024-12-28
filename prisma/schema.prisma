@@ -17,8 +17,8 @@ datasource db {
 model User {
   email     String    @unique
   name      String?
-  password  String
   verified  Boolean  @default(false)
+  picture   String?
 }
 
 /*model Session {
