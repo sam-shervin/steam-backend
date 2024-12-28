@@ -1,4 +1,4 @@
-//import prisma from "./db/prismaInstance.js";
+import prisma from "./db/prismaInstance.js";
 import dotenv from "dotenv";
 dotenv.config();
 import express from "express";
@@ -90,7 +90,7 @@ app.get("/profile", requiresAuth(), (req, res) => {
 
 
 // An endpoint that allows the user to update their profile.
-app.put("/profileUpdate", reqiresAuth(), (req, res) => {
+app.put("/profileUpdate", requiresAuth(), (req, res) => {
   const { name } = req.body;
   const { email, email_verified, picture } = req.oidc.user;
   prisma.user.upsert({

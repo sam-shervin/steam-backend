@@ -31,7 +31,7 @@ model Admin {
 }
 
 model Complaint {
-  complaintUID    String    @id
+  complaintUID    Int    @id  @default(autoincrement())
   email           String
   status          ComplaintStatus @default(PENDING)
   adminWhoModified String?
