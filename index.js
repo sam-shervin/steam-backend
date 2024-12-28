@@ -26,6 +26,8 @@ app.use(auth(config));
 
 app.set("trust proxy", true);
 
+app.use(express.static(path.join(__dirname, "public")));
+
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15-minute window
   max: 100, // Limit each IP to 100 requests per windowMs
@@ -36,18 +38,19 @@ const limiter = rateLimit({
 
 // Middleware to check if the user is an admin
 const checkIfAdmin = async (req, res, next) => {
-  const email = req.oidc.user.email;
+  if (req.oidc.isAuthenticated()) {
+    const email = req.oidc.user.email;
 
-  // Check if the user is an admin
-  const user = await prisma.user.findUnique({
-    where: { email: email },
-  });
+    // Check if the user is an admin
+    const user = await prisma.user.findUnique({
+      where: { email: email },
+    });
 
-  if (user?.isAdmin) {
-    // If admin, skip rate limiter
-    return next();
+    if (user?.isAdmin) {
+      // If admin, skip rate limiter
+      return next();
+    }
   }
-
   // If not an admin, apply the rate limiter
   limiter(req, res, next);
 };
@@ -82,12 +85,10 @@ app.get("/checkSession", (req, res) => {
   res.json({ loginStatus: req.oidc.isAuthenticated() });
 });
 
-
 // An endpoint that allows the user to view their profile.
 app.get("/profile", requiresAuth(), (req, res) => {
   res.json(req.oidc.user);
 });
-
 
 // An endpoint that allows the user to update their profile.
 app.put("/profileUpdate", requiresAuth(), (req, res) => {
@@ -106,13 +107,32 @@ app.put("/profileUpdate", requiresAuth(), (req, res) => {
   res.json({ success: true });
 });
 
-app.post("/heatMap", requiresAuth(), (req, res) => {
-  // get lat and lon and send to a flask server
-  //const { lat, lon } = req.body;
-  // send to flask server
-  res.json({ success: true });
-});
+app.get("/map", requiresAuth(), async (req, res) => {
+  const latitude = req.query.latitude;
+  const longitude = req.query.longitude;
 
+  if (!latitude || !longitude) {
+    return res.status(400).send("Latitude and longitude are required");
+  }
+
+  try {
+    // Forward the coordinates to the Flask API
+    const response = await fetch(
+      `http://localhost:5000/generate-map?latitude=${latitude}&longitude=${longitude}` // Call the Flask API - dummy URL
+      // replace it with the actual URL of the Flask API
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch map from Flask API");
+    }
+
+    const htmlContent = await response.text();
+    res.send(htmlContent); // Send the HTML content to the frontend
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).send("Error fetching map");
+  }
+});
 
 // An endpoint that allows the admin to promote a user to an admin.
 app.post("/promoteUser", requiresAuth(), async (req, res) => {
@@ -205,7 +225,6 @@ app.put("/complaint/status", requiresAuth(), async (req, res) => {
   res.json(updatedComplaint);
 });
 
-
 // An endpoint that allows the user to submit a complaint.
 app.post("/complaint", requiresAuth(), async (req, res) => {
   const { email } = req.oidc.user;
@@ -233,8 +252,6 @@ app.get("/myComplaints", requiresAuth(), async (req, res) => {
 
   res.json(complaints);
 });
-
-
 
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
