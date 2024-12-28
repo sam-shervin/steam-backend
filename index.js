@@ -34,7 +34,26 @@ const limiter = rateLimit({
   validate: { trustProxy: false }, // Disable the trust proxy validation check
 });
 
-app.use(limiter);
+// Middleware to check if the user is an admin
+const checkIfAdmin = async (req, res, next) => {
+  const email = req.oidc.user.email;
+
+  // Check if the user is an admin
+  const user = await prisma.user.findUnique({
+    where: { email: email },
+  });
+
+  if (user?.isAdmin) {
+    // If admin, skip rate limiter
+    return next();
+  }
+
+  // If not an admin, apply the rate limiter
+  limiter(req, res, next);
+};
+
+// Apply the checkIfAdmin middleware before the rate limiter
+app.use(checkIfAdmin);
 
 app.use(express.json());
 
@@ -58,14 +77,19 @@ app.use(
   })
 );
 
+// An endpoint that allows the user to view all users.
 app.get("/checkSession", (req, res) => {
   res.json({ loginStatus: req.oidc.isAuthenticated() });
 });
 
+
+// An endpoint that allows the user to view their profile.
 app.get("/profile", requiresAuth(), (req, res) => {
   res.json(req.oidc.user);
 });
 
+
+// An endpoint that allows the user to update their profile.
 app.put("/profileUpdate", reqiresAuth(), (req, res) => {
   const { name } = req.body;
   const { email, email_verified, picture } = req.oidc.user;
@@ -89,6 +113,8 @@ app.post("/heatMap", requiresAuth(), (req, res) => {
   res.json({ success: true });
 });
 
+
+// An endpoint that allows the admin to promote a user to an admin.
 app.post("/promoteUser", requiresAuth(), async (req, res) => {
   const { email } = req.body;
   const adminUser = req.oidc.user.email;
@@ -126,6 +152,7 @@ app.post("/promoteUser", requiresAuth(), async (req, res) => {
   res.json({ success: true });
 });
 
+// An endpoint that allows the admin to view all complaints.
 app.get("/complaints", requiresAuth(), async (req, res) => {
   const adminUser = req.oidc.user.email;
 
