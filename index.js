@@ -1,11 +1,13 @@
-import prisma from "./db/prismaInstance.js";
-import dotenv from "dotenv";
-dotenv.config();
+import pkgg from "@prisma/client";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import pkg from "express-openid-connect";
 //import cors
 import cors from "cors";
+import fetch from "node-fetch";
+
+const { PrismaClient } = pkgg;
+const prisma = new PrismaClient();
 
 const { auth, requiresAuth } = pkg;
 
@@ -25,8 +27,6 @@ const config = {
 app.use(auth(config));
 
 app.set("trust proxy", true);
-
-app.use(express.static(path.join(__dirname, "public")));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15-minute window
@@ -60,54 +60,158 @@ app.use(checkIfAdmin);
 
 app.use(express.json());
 
-// CORS setup
 const allowedOrigins = [
+  "https://admin.steams.social",
   "https://steams.social",
-  "https://www.steams.social, https://steamwys.us.auth0.com",
+  "https://www.steams.social",
+  "https://steamwys.us.auth0.com",
+  "https://localhost:3000",
 ];
+
+app.use((req, res, next) => {
+  console.log(`Incoming request from origin: ${req.headers.origin}`);
+  next();
+});
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      // Allow requests with no origin (like mobile apps or curl)
+      if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
+        console.error(`CORS blocked: ${origin}`);
         callback(new Error("Not allowed by CORS"));
       }
     },
     methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
   })
 );
+const Authorized = async (email) => {
+  const user = await prisma.user.findUnique({
+    where: { email: email },
+  });
+  return !!user;
+};
 
-// An endpoint that allows the user to view all users.
+// ----------------------------------------------------------------
+
+// An endpoint that checks if the user is authenticated.
 app.get("/checkSession", (req, res) => {
   res.json({ loginStatus: req.oidc.isAuthenticated() });
 });
 
-// An endpoint that allows the user to view their profile.
-app.get("/profile", requiresAuth(), (req, res) => {
-  res.json(req.oidc.user);
-});
+// ----------------------------------------------------------------
 
-// An endpoint that allows the user to update their profile.
-app.put("/profileUpdate", requiresAuth(), (req, res) => {
-  const { name } = req.body;
+// An endpoint that allows the user to log in, if not already authenticated.
+app.get("/letmein", async (req, res) => {
+  if (!req.oidc.isAuthenticated()) {
+    return res.redirect("/login");
+  }
+
   const { email, email_verified, picture } = req.oidc.user;
-  prisma.user.upsert({
-    where: { email: email },
-    update: { name: name },
-    create: {
+
+  // Insert user into the database
+  await prisma.user.create({
+    data: {
       email: email,
-      name: name,
       verified: email_verified,
       picture: picture,
+      isAdmin: false,
     },
   });
+
   res.json({ success: true });
 });
 
-app.get("/map", requiresAuth(), async (req, res) => {
+// ----------------------------------------------------------------
+
+app.get("/", (req, res) => {
+  res.redirect("https://steams.social");
+});
+
+// ----------------------------------------------------------------
+
+// An endpoint that gives the user's profile information.
+app.get("/self", async (req, res) => {
+  if (!req.oidc.isAuthenticated()) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  const isAuthorized = await Authorized(req.oidc.user.email);
+  if (!isAuthorized) {
+    return res.status(403).json({ error: "Not authorized" });
+  }
+
+  const { email, email_verified, picture } = req.oidc.user;
+  const user = await prisma.user.findUnique({
+    where: { email: email },
+  });
+
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  res.json({
+    email,
+    name: user.name,
+    email_verified,
+    picture,
+    isAdmin: user.isAdmin,
+  });
+});
+
+// ----------------------------------------------------------------
+
+// An endpoint that allows the user to update their profile.
+app.put("/profileUpdate", async (req, res) => {
+  if (!req.oidc.isAuthenticated()) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  const email = req.oidc.user.email;
+  const isAuthorized = await Authorized(email);
+  if (!isAuthorized) {
+    return res.status(403).json({ error: "Not authorized" });
+  }
+
+  const { name } = req.body;
+  const { email_verified, picture } = req.oidc.user;
+
+  try {
+    await prisma.user.upsert({
+      where: { email: email },
+      update: { name: name },
+      create: {
+        email: email,
+        name: name,
+        verified: email_verified,
+        picture: picture,
+      },
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ----------------------------------------------------------------
+
+// An endpoint to get the heatmap for a given location.
+app.get("/map", async (req, res) => {
+  if (!req.oidc.isAuthenticated()) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  const email = req.oidc.user.email;
+  const isAuthorized = await Authorized(email);
+  if (!isAuthorized) {
+    return res.status(403).json({ error: "Not authorized" });
+  }
+
   const latitude = req.query.latitude;
   const longitude = req.query.longitude;
 
@@ -118,8 +222,7 @@ app.get("/map", requiresAuth(), async (req, res) => {
   try {
     // Forward the coordinates to the Flask API
     const response = await fetch(
-      `http://localhost:5000/generate-map?latitude=${latitude}&longitude=${longitude}` // Call the Flask API - dummy URL
-      // replace it with the actual URL of the Flask API
+      `https://ml.steams.social/heatmaps?latitude=${latitude}&longitude=${longitude}` // Call the Flask API
     );
 
     if (!response.ok) {
@@ -134,17 +237,23 @@ app.get("/map", requiresAuth(), async (req, res) => {
   }
 });
 
+// ----------------------------------------------------------------
+
 // An endpoint that allows the admin to promote a user to an admin.
-app.post("/promoteUser", requiresAuth(), async (req, res) => {
+app.put("/promoteUser", async (req, res) => {
+  if (!req.oidc.isAuthenticated()) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  const adminEmail = req.oidc.user.email;
   const { email } = req.body;
-  const adminUser = req.oidc.user.email;
 
-  // Ensure the current user is an admin
-  const isAdmin = await prisma.user.findUnique({
-    where: { email: adminUser },
-  }).isAdmin;
+  // Ensure the current user is an admin and verified
+  const adminUser = await prisma.user.findUnique({
+    where: { email: adminEmail },
+  });
 
-  if (!isAdmin) {
+  if (!adminUser || !adminUser.isAdmin || !adminUser.verified) {
     return res.status(403).json({ error: "Not authorized" });
   }
 
@@ -156,24 +265,24 @@ app.post("/promoteUser", requiresAuth(), async (req, res) => {
     return res.status(404).json({ error: "User not found" });
   }
 
-  // Promote user to admin by adding to Admin table
-  await prisma.admin.create({
-    data: {
-      email: email,
-    },
-  });
+  try {
+    // Promote user to admin by updating the isAdmin flag
+    await prisma.user.update({
+      where: { email: email },
+      data: { isAdmin: true },
+    });
 
-  // Update the user record to set isAdmin flag
-  await prisma.user.update({
-    where: { email: email },
-    data: { isAdmin: true },
-  });
-
-  res.json({ success: true });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error promoting user:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
+// ----------------------------------------------------------------
+
 // An endpoint that allows the admin to view all complaints.
-app.get("/complaints", requiresAuth(), async (req, res) => {
+app.get("/complaints", async (req, res) => {
   const adminUser = req.oidc.user.email;
 
   // Check if user is an admin
