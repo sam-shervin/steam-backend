@@ -20,6 +20,7 @@ model User {
   verified   Boolean   @default(false)
   picture    String?
   isAdmin    Boolean   @default(false) // Flag to check if a user is admin
+
   complaints Complaint[]
   admin      Admin?
 }
@@ -33,12 +34,21 @@ model Admin {
 model Complaint {
   complaintUID    Int    @id  @default(autoincrement())
   email           String
-  status          ComplaintStatus @default(PENDING)
-  adminWhoModified String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  issue           String
 
   user            User      @relation(fields: [email], references: [email])
+  complaintAdmins ComplaintAdmin[]
+}
+
+model ComplaintAdmin {
+  id           Int      @id @default(autoincrement())
+  complaintUID Int
+  adminId      Int?
+  status       ComplaintStatus @default(NOT_VIEWED)
+  response     String?
+
+  complaint    Complaint @relation(fields: [complaintUID], references: [complaintUID])
+
 }
 
 enum ComplaintStatus {

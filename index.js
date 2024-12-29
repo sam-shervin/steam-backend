@@ -66,6 +66,8 @@ const allowedOrigins = [
   "https://www.steams.social",
   "https://steamwys.us.auth0.com",
   "https://localhost:3000",
+  "http://localhost:3000",
+  "https://*.steams.social",
 ];
 
 app.use((req, res, next) => {
@@ -110,20 +112,22 @@ app.get("/letmein", async (req, res) => {
   if (!req.oidc.isAuthenticated()) {
     return res.redirect("/login");
   }
+  const isAuthorized = await Authorized(req.oidc.user.email);
+  if (!isAuthorized) {
+    const { email, email_verified, picture } = req.oidc.user;
 
-  const { email, email_verified, picture } = req.oidc.user;
+    // Insert user into the database
+    await prisma.user.create({
+      data: {
+        email: email,
+        verified: email_verified,
+        picture: picture,
+        isAdmin: false,
+      },
+    });
+  }
 
-  // Insert user into the database
-  await prisma.user.create({
-    data: {
-      email: email,
-      verified: email_verified,
-      picture: picture,
-      isAdmin: false,
-    },
-  });
-
-  res.json({ success: true });
+  res.status(200).json({ success: true });
 });
 
 // ----------------------------------------------------------------
@@ -283,35 +287,77 @@ app.put("/promoteUser", async (req, res) => {
 
 // An endpoint that allows the admin to view all complaints.
 app.get("/complaints", async (req, res) => {
-  const adminUser = req.oidc.user.email;
-
-  // Check if user is an admin
-  const isAdmin = await prisma.user.findUnique({
-    where: { email: adminUser },
-  }).isAdmin;
-
-  if (!isAdmin) {
-    return res.status(403).json({ error: "Not authorized" });
+  console.log(req.headers.origin);
+  if (!req.oidc.isAuthenticated()) {
+    return res.status(401).json({ error: "Not authenticated" });
   }
+  const adminUser = req.oidc.user.email;
+  console.log("adminUser: ", adminUser);
 
-  const complaints = await prisma.complaint.findMany({
-    include: { user: true },
-  });
+  try {
+    // Check if the user exists and is an admin
+    const user = await prisma.user.findUnique({
+      where: { email: adminUser },
+    });
+    console.log("user: ", user);
+    if (!user || !user.isAdmin) {
+      return res.status(403).json({ error: "Not authorized" });
+    }
 
-  res.json(complaints);
+    // Fetch complaints with related user data
+    const complaints = await prisma.complaint.findMany({
+      include: { user: true }, // Include related user details
+    });
+
+    console.log("complaints: ", complaints);
+    res.status(200).json(complaints);
+  } catch (error) {
+    console.error("Error processing request: ", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // An endpoint that allows the admin to change the status of a complaint.
-app.put("/complaint/status", requiresAuth(), async (req, res) => {
-  const { complaintUID, status } = req.body;
-  const adminUser = req.oidc.user.email;
+// write an endpoint that allows the admin to change the status of a complaint.
+/*
+model ComplaintAdmin {
+  id           Int      @id @default(autoincrement())
+  complaintUID Int
+  adminId      Int
+  status       ComplaintStatus @default(NOT_VIEWED)
+  response     String?
 
-  // Check if user is an admin
-  const isAdmin = await prisma.user.findUnique({
-    where: { email: adminUser },
-  }).isAdmin;
+  complaint    Complaint @relation(fields: [complaintUID], references: [complaintUID])
 
-  if (!isAdmin) {
+}
+
+model Complaint {
+  complaintUID    Int    @id  @default(autoincrement())
+  email           String
+  issue           String
+
+  user            User      @relation(fields: [email], references: [email])
+  complaintAdmins ComplaintAdmin[]
+}
+
+complaints will be available in Complaint. and the complaints will be displayed in the admin panel.
+The admin can change the status of the complaint to either NOT_VIEWED, VIEWED, IN_PROGRESS, RESOLVED, or CLOSED.
+The admin can also add a response to the complaint. This will make changes to ComplaintAdmin table.
+*/
+
+app.put("/complaintStatus", async (req, res) => {
+  if (!req.oidc.isAuthenticated()) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+  const adminEmail = req.oidc.user.email;
+  const { complaintUID, status, response } = req.body;
+
+  // Ensure the current user is an admin
+  const adminUser = await prisma.user.findUnique({
+    where: { email: adminEmail },
+  });
+
+  if (!adminUser || !adminUser.isAdmin) {
     return res.status(403).json({ error: "Not authorized" });
   }
 
@@ -323,32 +369,46 @@ app.put("/complaint/status", requiresAuth(), async (req, res) => {
     return res.status(404).json({ error: "Complaint not found" });
   }
 
-  const updatedComplaint = await prisma.complaint.update({
-    where: { complaintUID: complaintUID },
-    data: {
-      status: status,
-      adminWhoModified: adminUser, // Admin who changed the status
-    },
-  });
+  try {
+    // Update the complaint status
+    await prisma.complaintAdmin.create({
+      data: {
+        complaintUID: complaintUID,
+        adminId: adminUser.id,
+        status: status,
+        response: response,
+      },
+    });
 
-  res.json(updatedComplaint);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error updating complaint status:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // An endpoint that allows the user to submit a complaint.
-app.post("/complaint", requiresAuth(), async (req, res) => {
+app.post("/complaint", async (req, res) => {
+  if (!req.oidc.isAuthenticated()) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+  const isAuthorized = await Authorized(email);
+  if (!isAuthorized) {
+    return res.status(403).json({ error: "Not authorized" });
+  }
+
   const { email } = req.oidc.user;
-  const { complaintUID, status = "NOT_VIEWED" } = req.body;
+  const { issue } = req.body;
 
   // Create complaint record in database
   const newComplaint = await prisma.complaint.create({
     data: {
-      complaintUID: complaintUID,
       email: email,
-      status: status,
+      issue: issue,
     },
   });
 
-  res.json({ success: true, complaint: newComplaint });
+  res.status(200).json({ success: true, complaint: newComplaint });
 });
 
 // An endpoint that allows the user to view their complaints.
