@@ -123,3 +123,101 @@ GOOGLE_CLIENT_SECRET="<your_google_client_secret>"
 ## License
 
 This project is licensed under the MIT License.
+
+---
+
+## **System Architecture Overview**
+Your architecture integrates multiple components to provide a seamless, secure, and scalable solution. Below is a breakdown of each part of the system:
+
+---
+
+### **Core Infrastructure**
+1. **Docker**  
+   - Containerized setup ensures modular and portable development.
+   - Services hosted as containers:
+     - **webServer (Node.js)**: Hosts backend APIs.
+     - **Database (PostgreSQL)**: Stores application data.
+     - **Nginx**: Acts as a reverse proxy and handles SSL termination.
+   - Facilitates orchestration of services and simplifies deployment.
+
+2. **Cloudflared (Cloudflare Tunnel)**  
+   - Exposes the locally deployed Docker services to a publicly accessible domain.
+   - Uses Cloudflare DNS for routing traffic securely.
+   - Eliminates the need for direct public IP exposure.
+
+---
+
+### **Frontend**
+1. **Next.js (React-based Framework)**  
+   - Developed for the user-facing application.
+   - Fetches data from backend APIs to perform CRUD operations.
+   - Implements CI/CD pipeline with **Cloudflare Pages**:
+     - Code hosted on GitHub.
+     - Automatic builds and deployments triggered on new commits.
+
+2. **Heatmap Generation**
+   - Coordinates collected from user interactions are sent to the backend via fetch requests.
+   - Frontend displays processed heatmaps to users and NGOs after receiving results.
+
+---
+
+### **Authentication Layer**
+1. **Auth0**  
+   - Middleware service for user authentication and management.
+   - Provides secure user discretization and role-based access control (e.g., users, NGOs).
+
+---
+
+### **Backend**
+1. **Node.js Backend**  
+   - Manages API requests from the frontend.
+   - Performs CRUD operations on the PostgreSQL database.
+   - Acts as a gateway for processing heatmap data.
+
+2. **Integration with Deep Learning Model**  
+   - Backend forwards heatmap coordinates to a dedicated Deep Learning Model API.
+   - The model processes the data and returns relevant results.
+   - Backend relays processed data to the frontend.
+
+---
+
+### **Database**
+1. **PostgreSQL**  
+   - Relational database for structured storage of user, heatmap, and application data.
+   - Optimized for performance and scalability with Dockerized setup.
+
+---
+
+### **Security and Performance**
+1. **Nginx (SSL Termination)**  
+   - Encrypts data in transit between clients and server using HTTPS.
+   - Manages load balancing and reverse proxy to backend services.
+   
+2. **Cloudflare**  
+   - Protects the domain from attacks using DDoS protection and Web Application Firewall (WAF).
+   - Ensures low-latency delivery through its global CDN.
+
+---
+
+### **Data Flow**
+1. **Frontend to Backend**  
+   - Frontend sends API requests (e.g., CRUD operations, heatmap coordinates).
+   - Backend processes requests and communicates with PostgreSQL or the Deep Learning Model API.
+
+2. **Backend to Deep Learning Model**  
+   - Heatmap data sent for analysis.
+   - Processed results returned to backend.
+
+3. **Frontend to Users/NGOs**  
+   - Processed heatmaps and relevant data are displayed to users in real time.
+
+---
+
+### **CI/CD Workflow**
+1. **Frontend**  
+   - Code changes on GitHub trigger Cloudflare Pages for automatic builds and deployments.
+
+2. **Backend**  
+   - Dockerized services allow rapid updates with minimal downtime.
+
+---
