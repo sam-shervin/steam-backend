@@ -306,7 +306,10 @@ app.get("/complaints", async (req, res) => {
 
     // Fetch complaints with related user data
     const complaints = await prisma.complaint.findMany({
-      include: { user: true }, // Include related user details
+      include: {
+        user: true,
+        complaintAdmins: true, // Include related ComplaintAdmin details
+      }, // Include related user details
     });
 
     console.log("complaints: ", complaints);
@@ -421,6 +424,9 @@ app.get("/myComplaints", requiresAuth(), async (req, res) => {
 
   res.json(complaints);
 });
+
+//write an endpoint to retrieve all responses, status, issue, and email of the complaints.
+// The endpoint should be protected and only accessible to the admin.
 
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
